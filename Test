@@ -1,0 +1,65 @@
+using UnityEngine;
+using UnityEngine.UI;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+using System.IO;
+using UnityEngine.Networking;
+
+public class SpeechRecognition : MonoBehaviour
+{
+    public Text transcriptionText; // UI Text to display transcription
+    private string url = "http://localhost:5000/recognize"; // Flask server endpoint
+
+    void Start()
+    {
+        StartCoroutine(RecognizeSpeech());
+    }
+
+    IEnumerator RecognizeSpeech()
+    {
+        // Request microphone access
+        yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
+        if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+        {
+            Debug.LogError("Microphone access denied.");
+            yield break;
+        }
+
+        // Start recording
+        AudioClip audioClip = Microphone.Start(null, true, 10, 16000);
+        yield return new WaitForSeconds(10); // Record for 10 seconds (adjust as needed)
+
+        // End recording and get data
+        Microphone.End(null);
+        float[] samples = new float[audioClip.samples];
+        audioClip.GetData(samples, 0);
+
+        // Convert audio data to byte array
+        int length = Mathf.CeilToInt(samples.Length) * 2;
+        byte[] byteArray = new byte[length];
+        Buffer.BlockCopy(samples, 0, byteArray, 0, length);
+
+        // Send audio data to Flask server
+        UnityWebRequest www = new UnityWebRequest(url, "POST");
+        www.uploadHandler = new UploadHandlerRaw(byteArray);
+        www.downloadHandler = new DownloadHandlerBuffer();
+        www.SetRequestHeader("Content-Type", "application/octet-stream");
+
+        yield return www.SendWebRequest();
+
+        if (www.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogError($"Network error: {www.error}");
+            yield break;
+        }
+
+        // Parse server response
+        string responseJson = www.downloadHandler.text;
+        Dictionary<string, string> responseData = JsonUtility.FromJson<Dictionary<string, string>>(responseJson);
+        string transcription = responseData["transcription"];
+
+        // Display transcription in Unity UI Text
+        transcriptionText.text = transcription;
+    }
+}
